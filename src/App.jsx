@@ -1,14 +1,12 @@
 import { useState, useRef } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
-// import modelFilePath from '/sequeezenet.onnx'
+import modelFilePath from '/squeezenet1_1.onnx'
 import './App.css'
 import * as ort from 'onnxruntime-web';
 import { imagenetClasses } from './imagenet';
 async function runSqueezeNet(image) {
   // const response = await fetch();
   // const modelFile = await response.arrayBuffer();
-  const session = await ort.InferenceSession.create('/squeezenet1_1.onnx', { executionProviders: ['cpu'] });
+  const session = await ort.InferenceSession.create(modelFilePath, { executionProviders: ['cpu'] });
   const inputTensor = preprocessImage(image);
   const feed = {};
   feed[session.inputNames[0]] = inputTensor;
