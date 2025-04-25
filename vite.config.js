@@ -6,7 +6,7 @@ import { viteStaticCopy } from 'vite-plugin-static-copy';
 // https://vite.dev/config/
 export default defineConfig({
   base: '/visionModels/', // Set the base path for GitHub Pages
-  plugins: [react(),viteStaticCopy({
+  plugins: [react(), viteStaticCopy({
     targets: [
       {
         src: "node_modules/onnxruntime-web/dist/*.wasm",
@@ -15,7 +15,7 @@ export default defineConfig({
     ]
   })],
   
-  assetsInclude: ["**/*.onnx"],
+  assetsInclude: ["**/*.onnx", "**/*.yaml"],
   optimizeDeps: {
     exclude: ["onnxruntime-web"],
   },

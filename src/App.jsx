@@ -4,6 +4,23 @@ import yolov9ModelFilePath from '/yolov9-c.onnx';
 import './App.css'
 import * as ort from 'onnxruntime-web';
 import { imagenetClasses } from './imagenet';
+import yaml from 'js-yaml';
+import metadataYaml from '/yolov9-c.yaml';
+
+let yoloClassNames = [];
+
+async function loadYoloClassNames() {
+  try {
+    const response = await fetch(metadataYaml);
+    const yamlText = await response.text();
+    const metadata = yaml.load(yamlText);
+    yoloClassNames = metadata.names;
+  } catch (error) {
+    console.error('Error loading YOLO class names:', error);
+  }
+}
+
+loadYoloClassNames();
 
 async function runSqueezeNet(image) {
   // const response = await fetch();
@@ -79,26 +96,95 @@ function postprocessOutput(output) {
 
 async function runYOLOv9(image) {
   const session = await ort.InferenceSession.create(yolov9ModelFilePath, { executionProviders: ['cpu'] });
+  const input_shape= [image.height, image.width, 3];
   const inputTensor = preprocessImage(image); // Reuse preprocessImage function
   const feed = {};
   feed[session.inputNames[0]] = inputTensor;
   const output = await session.run(feed);
-  const outputTensor = output[session.outputNames[0]];
-  const detections = postprocessYOLOv9Output(outputTensor);
+  const outputTensor = output[session.outputNames[1]];
+  const detections = postprocessYOLOv9Output(outputTensor, input_shape);
   console.log('Detections:', detections);
   return detections;
 }
 
-function postprocessYOLOv9Output(output) {
+function drawBoundingBoxes(canvas, detections) {
+  const context = canvas.getContext('2d');
+  context.strokeStyle = 'red';
+  context.lineWidth = 2;
+  context.font = '16px Arial';
+  context.fillStyle = 'red';
+
+  // Sort detections by confidence in descending order and take the top 5
+  const topDetections = detections.sort((a, b) => b.confidence - a.confidence).slice(0, 5);
+
+  topDetections.forEach(det => {
+    const { x, y, w, h, confidence, className } = det;
+    context.strokeRect(x, y, w, h);
+    context.fillText(`${className} (${confidence.toFixed(2)})`, x, y - 5);
+  });
+}
+
+
+function nonMaximaSuppression(detections, iouThreshold = 0.5) {
+  // Sort detections by confidence in descending order
+  detections.sort((a, b) => b.confidence - a.confidence);
+
+  const selectedDetections = [];
+
+  while (detections.length > 0) {
+    const best = detections.shift(); // Take the detection with the highest confidence
+    selectedDetections.push(best);
+
+    detections = detections.filter(det => {
+      const iou = calculateIoU(best, det);
+      return iou < iouThreshold; // Keep only boxes with IoU below the threshold
+    });
+  }
+
+  return selectedDetections;
+}
+
+function calculateIoU(boxA, boxB) {
+  const x1 = Math.max(boxA.x, boxB.x);
+  const y1 = Math.max(boxA.y, boxB.y);
+  const x2 = Math.min(boxA.x + boxA.w, boxB.x + boxB.w);
+  const y2 = Math.min(boxA.y + boxA.h, boxB.y + boxB.h);
+
+  const intersection = Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
+  const areaA = boxA.w * boxA.h;
+  const areaB = boxB.w * boxB.h;
+
+  const union = areaA + areaB - intersection;
+
+  return intersection / union;
+}
+
+function postprocessYOLOv9Output(output, input_shape, confidenceTH = 0.1) {
   // Assuming YOLOv9 output format: [x, y, w, h, confidence, classId]
   const detections = [];
-  for (let i = 0; i < output.data.length; i += 6) {
-    const [x, y, w, h, confidence, classId] = output.data.slice(i, i + 6);
-    if (confidence > 0.5) { // Filter by confidence threshold
-      detections.push({ x, y, w, h, confidence, classId });
+  const ratio_x = input_shape[1] / 640;
+  const ratio_y = input_shape[0] / 640;
+
+  for (let i = 0; i < output.dims[2]; i += 1) {
+    const x = output.data[i] * ratio_x;
+    const y = output.data[i + output.dims[2] * 1] * ratio_y;
+    const w = output.data[i + output.dims[2] * 2] * ratio_x;
+    const h = output.data[i + output.dims[2] * 3] * ratio_y;
+
+    const x1 = x - w / 2;
+    const y1 = y - h / 2;
+
+    const confidences = Array.from({ length: output.dims[1] - 4 }, (_, i1) => output.data[(i1 + 4) * output.dims[2] + i]);
+    const classId = confidences.indexOf(Math.max(...confidences));
+    const confidence = confidences[classId];
+
+    if (confidence > confidenceTH) { // Filter by confidence threshold
+      detections.push({ x: x1, y: y1, w, h, confidence, classId, className: yoloClassNames[classId] });
     }
   }
-  return detections;
+
+  // Apply Non-Maxima Suppression
+  return nonMaximaSuppression(detections);
 }
 
 function App() {
@@ -235,7 +321,7 @@ function YOLOv9App() {
             <ul>
               {detections.map((det, index) => (
                 <li key={index}>
-                  Class: {det.classId}, Confidence: {det.confidence.toFixed(2)}, BBox: ({det.x.toFixed(2)}, {det.y.toFixed(2)}, {det.w.toFixed(2)}, {det.h.toFixed(2)})
+                  Class: {det.className} ({det.classId}), Confidence: {det.confidence.toFixed(2)}, BBox: ({det.x.toFixed(2)}, {det.y.toFixed(2)}, {det.w.toFixed(2)}, {det.h.toFixed(2)})
                 </li>
               ))}
             </ul>
@@ -252,25 +338,6 @@ function YOLOv9App() {
       </div>
     </>
   );
-}
-
-function drawBoundingBoxes(canvas, detections) {
-  const context = canvas.getContext('2d');
-  context.strokeStyle = 'red';
-  context.lineWidth = 2;
-  context.font = '16px Arial';
-  context.fillStyle = 'red';
-
-  // Sort detections by confidence in descending order and take the top 5
-  const topDetections = detections.sort((a, b) => b.confidence - a.confidence).slice(0, 5);
-
-  topDetections.forEach(det => {
-    const { x, y, w, h, confidence, classId } = det;
-    const ratio_x = canvas.width / 640;
-    const ratio_y = canvas.height / 640;
-    context.strokeRect(x/ratio_x, y/ratio_y, w/ratio_x, h/ratio_y);
-    context.fillText(`Class: ${classId}, Conf: ${confidence.toFixed(2)}`, x, y - 5);
-  });
 }
 
 export default App
