@@ -25,7 +25,7 @@ loadYoloClassNames();
 async function runSqueezeNet(image) {
   // const response = await fetch();
   // const modelFile = await response.arrayBuffer();
-  const session = await ort.InferenceSession.create(modelFilePath, { executionProviders: ['cpu'] });
+  const session = await ort.InferenceSession.create(modelFilePath, { executionProviders: ['webgpu'] });
   const inputTensor = preprocessImage(image);
   const feed = {};
   feed[session.inputNames[0]] = inputTensor;
@@ -96,6 +96,7 @@ function postprocessOutput(output) {
 
 async function runYOLOv9(image) {
   const session = await ort.InferenceSession.create(yolov9ModelFilePath, { executionProviders: ['cpu'] });
+  console.log('YOLO runtime:', ort.env);
   const input_shape= [image.height, image.width, 3];
   const inputTensor = preprocessImage(image); // Reuse preprocessImage function
   const feed = {};
@@ -265,7 +266,8 @@ function YOLOv9App() {
   const [imageFile, setImageFile] = useState(null);
   const [detections, setDetections] = useState([]);
   const [imageUrl, setImageUrl] = useState('');
-  const canvasRef = useRef(null);
+  const inputCanvasRef = useRef(null);
+  const outputCanvasRef = useRef(null);
 
   const handleImageUpload = (event) => {
     const file = event.target.files[0];
@@ -274,7 +276,7 @@ function YOLOv9App() {
       const img = new Image();
       img.crossOrigin = "Anonymous";
       img.onload = () => {
-        const canvas = canvasRef.current;
+        const canvas = inputCanvasRef.current;
         if (!canvas) return;
         const context = canvas.getContext('2d');
         canvas.width = img.width;
@@ -289,7 +291,7 @@ function YOLOv9App() {
     const img = new Image();
     img.crossOrigin = "Anonymous";
     img.onload = () => {
-      const canvas = canvasRef.current;
+      const canvas = inputCanvasRef.current;
       if (!canvas) return;
       const context = canvas.getContext('2d');
       canvas.width = img.width;
@@ -301,10 +303,19 @@ function YOLOv9App() {
 
   const handleRunYOLOv9 = async () => {
     if (imageFile || imageUrl) {
-      const canvas = canvasRef.current;
-      const detections = await runYOLOv9(canvas);
+      const inputCanvas = inputCanvasRef.current;
+      const outputCanvas = outputCanvasRef.current;
+      if (!outputCanvas) return;
+
+      const detections = await runYOLOv9(inputCanvas);
       setDetections(detections);
-      drawBoundingBoxes(canvas, detections);
+
+      // Draw bounding boxes on the output canvas
+      const context = outputCanvas.getContext('2d');
+      outputCanvas.width = inputCanvas.width;
+      outputCanvas.height = inputCanvas.height;
+      context.drawImage(inputCanvas, 0, 0);
+      drawBoundingBoxes(outputCanvas, detections);
     } else {
       alert('Please upload an image or enter an image URL first.');
     }
@@ -314,7 +325,7 @@ function YOLOv9App() {
     <>
       <div className="image-upload">
         <input type="file" accept="image/*" onChange={handleImageUpload} />
-        <canvas ref={canvasRef} />
+        <canvas ref={inputCanvasRef} />
         <button onClick={handleRunYOLOv9}>Run YOLOv9</button>
         <div className="detections">
           {detections.length > 0 && (
@@ -335,6 +346,9 @@ function YOLOv9App() {
           onChange={(e) => setImageUrl(e.target.value)}
         />
         <button onClick={handleLoadImageFromUrl}>Load Image</button>
+      </div>
+      <div className="output-canvas">
+        <canvas ref={outputCanvasRef} />
       </div>
     </>
   );
