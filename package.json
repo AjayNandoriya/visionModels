@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "js-yaml": "^4.1.0",
-    "onnxruntime-web": "^1.21.0",
+    "onnxruntime-web": "^1.22.0-dev.20250423-8d86dae0be",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "vite-plugin-static-copy": "^2.3.1"
