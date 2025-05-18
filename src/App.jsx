@@ -94,14 +94,32 @@ function postprocessOutput(output) {
           prob: softmaxOutput[maxIndex]};
 }
 
-async function runYOLOv9(image) {
-  const session = await ort.InferenceSession.create(yolov9ModelFilePath, { executionProviders: ['cpu'] });
+async function runYOLOv9(image, customModelFile) {
+  let session;
+  const t0 = performance.now();
+  if (customModelFile) {
+    // If a custom model file is provided, read it as ArrayBuffer
+    let modelBuffer;
+    if (customModelFile instanceof ArrayBuffer) {
+      modelBuffer = customModelFile;
+    } else {
+      modelBuffer = await customModelFile.arrayBuffer();
+    }
+    session = await ort.InferenceSession.create(modelBuffer, { executionProviders: ['cpu'] });
+  } else {
+    session = await ort.InferenceSession.create(yolov9ModelFilePath, { executionProviders: ['cpu'] });
+  }
+  const t1 = performance.now();
+  console.log('YOLO session creation time:', (t1 - t0).toFixed(2), 'ms');
   console.log('YOLO runtime:', ort.env);
   const input_shape= [image.height, image.width, 3];
   const inputTensor = preprocessImage(image); // Reuse preprocessImage function
   const feed = {};
   feed[session.inputNames[0]] = inputTensor;
+  const t2 = performance.now();
   const output = await session.run(feed);
+  const t3 = performance.now();
+  console.log('YOLO model inference time:', (t3 - t2).toFixed(2), 'ms');
   const outputTensor = output[session.outputNames[1]];
   const detections = postprocessYOLOv9Output(outputTensor, input_shape);
   console.log('Detections:', detections);
@@ -266,6 +284,7 @@ function YOLOv9App() {
   const [imageFile, setImageFile] = useState(null);
   const [detections, setDetections] = useState([]);
   const [imageUrl, setImageUrl] = useState('');
+  const [modelFile, setModelFile] = useState(null); // New state for YOLO model file
   const inputCanvasRef = useRef(null);
   const outputCanvasRef = useRef(null);
 
@@ -285,6 +304,11 @@ function YOLOv9App() {
       };
       img.src = URL.createObjectURL(file);
     }
+  };
+
+  const handleModelUpload = (event) => {
+    const file = event.target.files[0];
+    setModelFile(file);
   };
 
   const handleLoadImageFromUrl = () => {
@@ -307,7 +331,7 @@ function YOLOv9App() {
       const outputCanvas = outputCanvasRef.current;
       if (!outputCanvas) return;
 
-      const detections = await runYOLOv9(inputCanvas);
+      const detections = await runYOLOv9(inputCanvas, modelFile);
       setDetections(detections);
 
       // Draw bounding boxes on the output canvas
@@ -324,6 +348,11 @@ function YOLOv9App() {
   return (
     <>
       <div className="image-upload">
+        <input type="file" accept=".onnx" onChange={handleModelUpload} />
+        <span style={{marginLeft: '8px', fontSize: '0.9em'}}>
+          {modelFile ? `Model: ${modelFile.name}` : 'Using default YOLOv9 model'}
+        </span>
+        <br />
         <input type="file" accept="image/*" onChange={handleImageUpload} />
         <canvas ref={inputCanvasRef} />
         <button onClick={handleRunYOLOv9}>Run YOLOv9</button>
